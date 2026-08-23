@@ -469,49 +469,6 @@
         `).join("");
     };
 
-    // ---------------------------------------------------------
-    // IMPLANTS
-    // ---------------------------------------------------------
-
-    window.loadImplants = async function loadImplants() {
-        showPage("implants");
-
-        const tableBody = document.getElementById("implantTableBody");
-
-        if (!tableBody) return;
-
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="7" class="text-center">Loading...</td>
-            </tr>
-        `;
-
-        const { data, error } = await db
-            .from("implants")
-            .select("*");
-
-        if (error) {
-            console.error("Implant loading error:", error);
-            tableBody.innerHTML = `
-                <tr>
-                    <td colspan="7" class="text-danger">
-                        ${escapeHtml(formatError(error))}
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        if (!data || data.length === 0) {
-            tableBody.innerHTML = `
-                <tr>
-                    <td colspan="7" class="text-center">
-                        No implants found.
-                    </td>
-                </tr>
-            `;
-            return;
-        }
 
         tableBody.innerHTML = data.map((implant) => `
             <tr>
