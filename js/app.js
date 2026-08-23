@@ -2,607 +2,490 @@
     "use strict";
 
     // =========================================================
-    // GLOBAL FUNCTIONS
+    // APPLICATION STATE
     // =========================================================
 
-    window.showPage = function (pageId) {
-        const target = document.getElementById(pageId);
+    let db = null;
+    let currentPatient = null;
 
-        if (!target) {
-            console.error("Page not found:", pageId);
+    const PATIENT_STORAGE_KEY = "patient_id";
+    const DEFAULT_STORAGE_BUCKET = "medical-images";
+
+
+    // =========================================================
+    // BASIC HELPERS
+    // =========================================================
+
+    function getPatientId() {
+        return localStorage.getItem(PATIENT_STORAGE_KEY);
+    }
+
+
+    function setPatientId(patientId) {
+        if (patientId) {
+            localStorage.setItem(
+                PATIENT_STORAGE_KEY,
+                patientId
+            );
+        }
+    }
+
+
+    function clearPatientSession() {
+        localStorage.removeItem(
+            PATIENT_STORAGE_KEY
+        );
+
+        currentPatient = null;
+    }
+
+
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+    }
+
+
+    function formatError(
+        error,
+        fallback = "Something went wrong."
+    ) {
+        return error?.message || fallback;
+    }
+
+
+    function showError(elementId, message) {
+
+        const element =
+            document.getElementById(elementId);
+
+        if (!element) {
+            console.error(
+                `Element #${elementId} was not found.`
+            );
             return;
         }
 
-        document.querySelectorAll(".page").forEach((page) => {
-            page.classList.remove("active-page");
-        });
+        element.textContent = message;
+        element.style.display = "block";
+    }
 
-        target.classList.add("active-page");
+
+    function hideError(elementId) {
+
+        const element =
+            document.getElementById(elementId);
+
+        if (!element) {
+            return;
+        }
+
+        element.textContent = "";
+        element.style.display = "none";
+    }
+
+
+    function setLoading(
+        elementId,
+        message = "Loading..."
+    ) {
+
+        const element =
+            document.getElementById(elementId);
+
+        if (!element) {
+            return;
+        }
+
+        element.innerHTML = `
+            <p class="text-muted">
+                ${escapeHtml(message)}
+            </p>
+        `;
+    }
+
+
+    function requirePatient() {
+
+        const patientId =
+            getPatientId();
+
+        if (!patientId) {
+
+            alert(
+                "Please login first."
+            );
+
+            window.showPage("home");
+
+            return null;
+        }
+
+        return patientId;
+    }
+
+
+    // =========================================================
+    // PAGE NAVIGATION
+    // =========================================================
+
+    window.showPage = function showPage(pageId) {
+
+        const target =
+            document.getElementById(pageId);
+
+        if (!target) {
+
+            console.error(
+                `Page "${pageId}" does not exist in index.html`
+            );
+
+            return;
+        }
+
+
+        // Hide all pages
+        document
+            .querySelectorAll(".page")
+            .forEach((page) => {
+
+                page.classList.remove(
+                    "active-page"
+                );
+            });
+
+
+        // Show requested page
+        target.classList.add(
+            "active-page"
+        );
+
 
         window.scrollTo({
             top: 0,
             behavior: "smooth"
         });
 
-        // Load data when required
-        if (pageId === "profile" && typeof window.loadPatientProfile === "function") {
-            window.loadPatientProfile();
+
+        // Load profile data
+        if (pageId === "profile") {
+
+            if (
+                typeof window.loadPatientProfile ===
+                "function"
+            ) {
+
+                window.loadPatientProfile();
+            }
         }
 
-        if (
-            pageId === "medicalImages" &&
-            typeof window.loadMedicalImages === "function"
-        ) {
-            window.loadMedicalImages();
+
+        // Load medical images
+        if (pageId === "medicalImages") {
+
+            if (
+                typeof window.loadMedicalImages ===
+                "function"
+            ) {
+
+                window.loadMedicalImages();
+            }
         }
 
-        if (
-            pageId === "aiResults" &&
-            typeof window.loadAIResults === "function"
-        ) {
-            window.loadAIResults();
+
+        // Load AI results
+        if (pageId === "aiResults") {
+
+            if (
+                typeof window.loadAIResults ===
+                "function"
+            ) {
+
+                window.loadAIResults();
+            }
         }
     };
 
 
     // =========================================================
-    // APPLICATION START
+    // LOAD PATIENT PROFILE
     // =========================================================
 
-    document.addEventListener("DOMContentLoaded", initialize);
+    window.loadPatientProfile =
+        async function loadPatientProfile() {
 
+            if (!db) {
 
-    async function initialize() {
-
-        console.log("=================================");
-        console.log("AI Knee Analysis System");
-        console.log("Initializing application...");
-        console.log("=================================");
-
-
-        // =====================================================
-        // CHECK CONFIG.JS
-        // =====================================================
-
-        if (!window.APP_CONFIG) {
-            console.error(
-                "ERROR: APP_CONFIG not found."
-            );
-
-            alert(
-                "Application configuration is missing. Please check js/config.js."
-            );
-
-            return;
-        }
-
-
-        const {
-            SUPABASE_URL,
-            SUPABASE_PUBLISHABLE_KEY,
-            STORAGE_BUCKET = "medical-images"
-        } = window.APP_CONFIG;
-
-
-        if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-
-            console.error(
-                "ERROR: Supabase URL or key is missing."
-            );
-
-            alert(
-                "Supabase configuration is incomplete."
-            );
-
-            return;
-        }
-
-
-        // =====================================================
-        // CHECK SUPABASE
-        // =====================================================
-
-        if (!window.supabase) {
-
-            console.error(
-                "ERROR: Supabase library was not loaded."
-            );
-
-            alert(
-                "Supabase library is not loaded."
-            );
-
-            return;
-        }
-
-
-        // =====================================================
-        // CREATE DATABASE CLIENT
-        // =====================================================
-
-        const db = window.supabase.createClient(
-            SUPABASE_URL,
-            SUPABASE_PUBLISHABLE_KEY
-        );
-
-
-        console.log(
-            "Supabase client initialized."
-        );
-
-
-        // =====================================================
-        // APPLICATION STATE
-        // =====================================================
-
-        let currentPatient = null;
-
-        const PATIENT_STORAGE_KEY = "patient_id";
-
-
-        // =====================================================
-        // HELPER FUNCTIONS
-        // =====================================================
-
-        function getPatientId() {
-
-            return localStorage.getItem(
-                PATIENT_STORAGE_KEY
-            );
-        }
-
-
-        function setPatientId(patientId) {
-
-            if (patientId) {
-
-                localStorage.setItem(
-                    PATIENT_STORAGE_KEY,
-                    patientId
+                console.error(
+                    "Database is not initialized."
                 );
-            }
-        }
 
-
-        function clearPatientSession() {
-
-            localStorage.removeItem(
-                PATIENT_STORAGE_KEY
-            );
-
-            currentPatient = null;
-        }
-
-
-        function showError(elementId, message) {
-
-            const element =
-                document.getElementById(elementId);
-
-            if (!element) {
-                console.warn(
-                    `Element not found: ${elementId}`
-                );
                 return;
             }
 
-            element.textContent = message;
-            element.style.display = "block";
-        }
-
-
-        function hideError(elementId) {
-
-            const element =
-                document.getElementById(elementId);
-
-            if (!element) {
-                return;
-            }
-
-            element.textContent = "";
-            element.style.display = "none";
-        }
-
-
-        function escapeHtml(value) {
-
-            return String(value ?? "")
-                .replaceAll("&", "&amp;")
-                .replaceAll("<", "&lt;")
-                .replaceAll(">", "&gt;")
-                .replaceAll('"', "&quot;")
-                .replaceAll("'", "&#039;");
-        }
-
-
-        function formatError(
-            error,
-            fallback = "Something went wrong."
-        ) {
-
-            return error?.message || fallback;
-        }
-
-
-        function setLoading(
-            elementId,
-            message = "Loading..."
-        ) {
-
-            const element =
-                document.getElementById(elementId);
-
-            if (element) {
-
-                element.innerHTML = `
-                    <p class="text-muted">
-                        ${escapeHtml(message)}
-                    </p>
-                `;
-            }
-        }
-
-
-        function requirePatient() {
 
             const patientId =
                 getPatientId();
 
+
             if (!patientId) {
 
-                alert(
-                    "Please login first."
+                console.log(
+                    "No patient ID found."
                 );
 
-                window.showPage("home");
-
-                return null;
+                return;
             }
 
-            return patientId;
-        }
+
+            console.log(
+                "Loading patient profile:",
+                patientId
+            );
 
 
-        // =====================================================
-        // PATIENT PROFILE
-        // =====================================================
+            try {
 
-        window.loadPatientProfile =
-            async function loadPatientProfile() {
+                const {
+                    data,
+                    error
+                } = await db
+                    .from("Patients")
+                    .select("*")
+                    .eq(
+                        "patient_id",
+                        patientId
+                    )
+                    .maybeSingle();
 
-                const patientId =
-                    getPatientId();
 
+                if (error) {
 
-                if (!patientId) {
+                    console.error(
+                        "Profile database error:",
+                        error
+                    );
 
-                    console.log(
-                        "No patient session found."
+                    alert(
+                        "Unable to load patient profile: " +
+                        formatError(error)
                     );
 
                     return;
+                }
+
+
+                if (!data) {
+
+                    console.error(
+                        "Patient record not found."
+                    );
+
+                    alert(
+                        "Patient record not found."
+                    );
+
+                    clearPatientSession();
+
+                    window.showPage(
+                        "home"
+                    );
+
+                    return;
+                }
+
+
+                currentPatient =
+                    data;
+
+
+                // Patient name
+                const displayName =
+                    document.getElementById(
+                        "displayName"
+                    );
+
+                if (displayName) {
+                    displayName.textContent =
+                        data.name || "-";
+                }
+
+
+                // Profile name
+                const displayProfileName =
+                    document.getElementById(
+                        "displayProfileName"
+                    );
+
+                if (displayProfileName) {
+                    displayProfileName.textContent =
+                        data.name || "-";
+                }
+
+
+                // Patient ID
+                const displayPatientId =
+                    document.getElementById(
+                        "displayPatientId"
+                    );
+
+                if (displayPatientId) {
+                    displayPatientId.textContent =
+                        data.patient_id || "-";
+                }
+
+
+                // Age
+                const displayAge =
+                    document.getElementById(
+                        "displayAge"
+                    );
+
+                if (displayAge) {
+                    displayAge.textContent =
+                        data.age ?? "-";
+                }
+
+
+                // Gender
+                const displayGender =
+                    document.getElementById(
+                        "displayGender"
+                    );
+
+                if (displayGender) {
+                    displayGender.textContent =
+                        data.gender || "-";
+                }
+
+
+                // Weight
+                const displayWeight =
+                    document.getElementById(
+                        "displayWeight"
+                    );
+
+                if (displayWeight) {
+
+                    displayWeight.textContent =
+                        data.weight != null
+                            ? `${data.weight} kg`
+                            : "-";
+                }
+
+
+                // Height
+                const displayHeight =
+                    document.getElementById(
+                        "displayHeight"
+                    );
+
+                if (displayHeight) {
+
+                    displayHeight.textContent =
+                        data.height != null
+                            ? `${data.height} cm`
+                            : "-";
                 }
 
 
                 console.log(
-                    "Loading patient:",
-                    patientId
+                    "Patient profile loaded successfully."
+                );
+
+            } catch (error) {
+
+                console.error(
+                    "Profile exception:",
+                    error
+                );
+
+                alert(
+                    formatError(
+                        error,
+                        "Unable to load patient profile."
+                    )
+                );
+            }
+        };
+
+
+    // =========================================================
+    // LOAD MEDICAL IMAGES
+    // =========================================================
+
+    window.loadMedicalImages =
+        async function loadMedicalImages() {
+
+            if (!db) {
+
+                console.error(
+                    "Database is not initialized."
+                );
+
+                return;
+            }
+
+
+            const patientId =
+                requirePatient();
+
+
+            if (!patientId) {
+                return;
+            }
+
+
+            const imageList =
+                document.getElementById(
+                    "imageList"
                 );
 
 
-                try {
+            if (!imageList) {
 
-                    const {
-                        data,
-                        error
-                    } = await db
-                        .from("Patients")
-                        .select("*")
-                        .eq(
-                            "patient_id",
-                            patientId
-                        )
-                        .maybeSingle();
-
-
-                    if (error) {
-
-                        console.error(
-                            "Profile loading error:",
-                            error
-                        );
-
-                        alert(
-                            "Unable to load patient information: " +
-                            formatError(error)
-                        );
-
-                        return;
-                    }
-
-
-                    if (!data) {
-
-                        console.error(
-                            "Patient record not found."
-                        );
-
-                        alert(
-                            "Patient record not found."
-                        );
-
-                        clearPatientSession();
-
-                        window.showPage("home");
-
-                        return;
-                    }
-
-
-                    currentPatient = data;
-
-
-                    // -----------------------------------------
-                    // UPDATE PROFILE
-                    // -----------------------------------------
-
-                    const displayName =
-                        document.getElementById(
-                            "displayName"
-                        );
-
-                    const displayProfileName =
-                        document.getElementById(
-                            "displayProfileName"
-                        );
-
-                    const displayPatientId =
-                        document.getElementById(
-                            "displayPatientId"
-                        );
-
-                    const displayAge =
-                        document.getElementById(
-                            "displayAge"
-                        );
-
-                    const displayGender =
-                        document.getElementById(
-                            "displayGender"
-                        );
-
-                    const displayWeight =
-                        document.getElementById(
-                            "displayWeight"
-                        );
-
-                    const displayHeight =
-                        document.getElementById(
-                            "displayHeight"
-                        );
-
-
-                    if (displayName) {
-                        displayName.textContent =
-                            data.name || "-";
-                    }
-
-
-                    if (displayProfileName) {
-                        displayProfileName.textContent =
-                            data.name || "-";
-                    }
-
-
-                    if (displayPatientId) {
-                        displayPatientId.textContent =
-                            data.patient_id || "-";
-                    }
-
-
-                    if (displayAge) {
-                        displayAge.textContent =
-                            data.age ?? "-";
-                    }
-
-
-                    if (displayGender) {
-                        displayGender.textContent =
-                            data.gender || "-";
-                    }
-
-
-                    if (displayWeight) {
-                        displayWeight.textContent =
-                            data.weight != null
-                                ? `${data.weight} kg`
-                                : "-";
-                    }
-
-
-                    if (displayHeight) {
-                        displayHeight.textContent =
-                            data.height != null
-                                ? `${data.height} cm`
-                                : "-";
-                    }
-
-
-                    console.log(
-                        "Patient profile loaded successfully."
-                    );
-
-                } catch (error) {
-
-                    console.error(
-                        "Profile exception:",
-                        error
-                    );
-                }
-            };
-
-
-        // =====================================================
-        // MEDICAL IMAGE LIST
-        // =====================================================
-
-        window.loadMedicalImages =
-            async function loadMedicalImages() {
-
-                const patientId =
-                    requirePatient();
-
-
-                if (!patientId) {
-                    return;
-                }
-
-
-                const imageList =
-                    document.getElementById(
-                        "imageList"
-                    );
-
-
-                if (!imageList) {
-
-                    console.error(
-                        "imageList element not found."
-                    );
-
-                    return;
-                }
-
-
-                setLoading(
-                    "imageList",
-                    "Loading medical images..."
+                console.error(
+                    "#imageList was not found."
                 );
 
-
-                try {
-
-                    const {
-                        data,
-                        error
-                    } = await db
-                        .from("medical_images")
-                        .select("*")
-                        .eq(
-                            "patient_id",
-                            patientId
-                        )
-                        .order(
-                            "created_at",
-                            {
-                                ascending: false
-                            }
-                        );
+                return;
+            }
 
 
-                    if (error) {
-
-                        console.error(
-                            "Medical image loading error:",
-                            error
-                        );
+            setLoading(
+                "imageList",
+                "Loading medical images..."
+            );
 
 
-                        imageList.innerHTML = `
-                            <div class="alert alert-danger">
-                                ${escapeHtml(
-                                    formatError(error)
-                                )}
-                            </div>
-                        `;
+            try {
 
-                        return;
-                    }
-
-
-                    if (
-                        !data ||
-                        data.length === 0
-                    ) {
-
-                        imageList.innerHTML = `
-                            <p class="text-muted">
-                                No medical image records found.
-                            </p>
-                        `;
-
-                        return;
-                    }
-
-
-                    imageList.innerHTML =
-                        data.map(
-                            (image) => {
-
-                                const publicUrl =
-                                    image.public_url || "";
-
-
-                                let imagePreview = "";
-
-
-                                if (
-                                    publicUrl &&
-                                    image.image_type !== "MRI"
-                                ) {
-
-                                    imagePreview = `
-                                        <div class="mt-3">
-                                            <img
-                                                src="${escapeHtml(publicUrl)}"
-                                                alt="Medical image"
-                                                class="image-preview img-fluid"
-                                            >
-                                        </div>
-                                    `;
-                                }
-
-
-                                return `
-                                    <div class="border rounded p-3 mb-3">
-
-                                        <strong>
-                                            ${escapeHtml(
-                                                image.file_name ||
-                                                "Medical Image"
-                                            )}
-                                        </strong>
-
-                                        <br>
-
-                                        <small>
-                                            Type:
-                                            ${escapeHtml(
-                                                image.image_type ||
-                                                "-"
-                                            )}
-                                        </small>
-
-                                        ${imagePreview}
-
-                                    </div>
-                                `;
-
-                            }
-                        ).join("");
-
-
-                    console.log(
-                        "Medical images loaded:",
-                        data.length
+                const {
+                    data,
+                    error
+                } = await db
+                    .from("medical_images")
+                    .select("*")
+                    .eq(
+                        "patient_id",
+                        patientId
+                    )
+                    .order(
+                        "created_at",
+                        {
+                            ascending: false
+                        }
                     );
 
 
-                } catch (error) {
+                if (error) {
 
                     console.error(
-                        "Medical image exception:",
+                        "Medical images database error:",
                         error
                     );
 
@@ -610,689 +493,221 @@
                     imageList.innerHTML = `
                         <div class="alert alert-danger">
                             ${escapeHtml(
-                                formatError(
-                                    error,
-                                    "Unable to load medical images."
-                                )
+                                formatError(error)
                             )}
                         </div>
                     `;
-                }
-            };
 
-
-        // =====================================================
-        // PATIENT REGISTRATION
-        // =====================================================
-
-        const registerForm =
-            document.getElementById(
-                "registerForm"
-            );
-
-
-        if (registerForm) {
-
-            registerForm.addEventListener(
-                "submit",
-                async function (event) {
-
-                    event.preventDefault();
-
-                    hideError(
-                        "registerError"
-                    );
-
-
-                    const patientData = {
-
-                        patient_id:
-                            document
-                                .getElementById(
-                                    "patientId"
-                                )
-                                ?.value
-                                .trim(),
-
-                        name:
-                            document
-                                .getElementById(
-                                    "name"
-                                )
-                                ?.value
-                                .trim(),
-
-                        age:
-                            Number(
-                                document
-                                    .getElementById(
-                                        "age"
-                                    )
-                                    ?.value
-                            ),
-
-                        gender:
-                            document
-                                .getElementById(
-                                    "gender"
-                                )
-                                ?.value,
-
-                        weight:
-                            Number(
-                                document
-                                    .getElementById(
-                                        "weight"
-                                    )
-                                    ?.value
-                            ),
-
-                        height:
-                            Number(
-                                document
-                                    .getElementById(
-                                        "height"
-                                    )
-                                    ?.value
-                            )
-                    };
-
-
-                    if (
-                        !patientData.patient_id ||
-                        !patientData.name
-                    ) {
-
-                        showError(
-                            "registerError",
-                            "Patient ID and name are required."
-                        );
-
-                        return;
-                    }
-
-
-                    try {
-
-                        console.log(
-                            "Registering patient..."
-                        );
-
-
-                        const {
-                            data,
-                            error
-                        } = await db
-                            .from("Patients")
-                            .insert(
-                                patientData
-                            )
-                            .select()
-                            .single();
-
-
-                        if (error) {
-
-                            console.error(
-                                "Registration database error:",
-                                error
-                            );
-
-
-                            showError(
-                                "registerError",
-                                "Registration failed: " +
-                                formatError(error)
-                            );
-
-                            return;
-                        }
-
-
-                        currentPatient =
-                            data;
-
-
-                        setPatientId(
-                            data.patient_id
-                        );
-
-
-                        registerForm.reset();
-
-
-                        alert(
-                            "Patient registered successfully!"
-                        );
-
-
-                        window.showPage(
-                            "profile"
-                        );
-
-
-                    } catch (error) {
-
-                        console.error(
-                            "Registration exception:",
-                            error
-                        );
-
-
-                        showError(
-                            "registerError",
-                            formatError(
-                                error,
-                                "Registration failed."
-                            )
-                        );
-                    }
-                }
-            );
-
-        } else {
-
-            console.warn(
-                "registerForm not found."
-            );
-        }
-
-
-        // =====================================================
-        // OLD PATIENT LOGIN
-        // =====================================================
-
-        const loginForm =
-            document.getElementById(
-                "loginForm"
-            );
-
-
-        if (loginForm) {
-
-            loginForm.addEventListener(
-                "submit",
-                async function (event) {
-
-                    event.preventDefault();
-
-                    hideError(
-                        "loginError"
-                    );
-
-
-                    const loginInput =
-                        document.getElementById(
-                            "loginPatientId"
-                        );
-
-
-                    const patientId =
-                        loginInput?.value.trim();
-
-
-                    if (!patientId) {
-
-                        showError(
-                            "loginError",
-                            "Please enter a Patient ID."
-                        );
-
-                        return;
-                    }
-
-
-                    try {
-
-                        console.log(
-                            "Searching patient:",
-                            patientId
-                        );
-
-
-                        const {
-                            data,
-                            error
-                        } = await db
-                            .from("Patients")
-                            .select("*")
-                            .eq(
-                                "patient_id",
-                                patientId
-                            )
-                            .maybeSingle();
-
-
-                        if (error) {
-
-                            console.error(
-                                "Login database error:",
-                                error
-                            );
-
-
-                            showError(
-                                "loginError",
-                                "Unable to find patient: " +
-                                formatError(error)
-                            );
-
-                            return;
-                        }
-
-
-                        if (!data) {
-
-                            showError(
-                                "loginError",
-                                "Patient ID not found."
-                            );
-
-                            return;
-                        }
-
-
-                        currentPatient =
-                            data;
-
-
-                        setPatientId(
-                            data.patient_id
-                        );
-
-
-                        loginForm.reset();
-
-
-                        console.log(
-                            "Patient login successful."
-                        );
-
-
-                        alert(
-                            "Patient record found!"
-                        );
-
-
-                        window.showPage(
-                            "profile"
-                        );
-
-
-                    } catch (error) {
-
-                        console.error(
-                            "Login exception:",
-                            error
-                        );
-
-
-                        showError(
-                            "loginError",
-                            formatError(
-                                error,
-                                "Login failed."
-                            )
-                        );
-                    }
-                }
-            );
-
-        } else {
-
-            console.warn(
-                "loginForm not found."
-            );
-        }
-
-
-        // =====================================================
-        // MEDICAL IMAGE UPLOAD
-        // =====================================================
-
-        const imageForm =
-            document.getElementById(
-                "imageForm"
-            );
-
-
-        if (imageForm) {
-
-            imageForm.addEventListener(
-                "submit",
-                async function (event) {
-
-                    event.preventDefault();
-
-
-                    const patientId =
-                        requirePatient();
-
-
-                    if (!patientId) {
-                        return;
-                    }
-
-
-                    const fileInput =
-                        document.getElementById(
-                            "medicalFile"
-                        );
-
-
-                    const imageTypeInput =
-                        document.getElementById(
-                            "imageType"
-                        );
-
-
-                    const file =
-                        fileInput?.files?.[0];
-
-
-                    const imageType =
-                        imageTypeInput?.value;
-
-
-                    if (!file) {
-
-                        alert(
-                            "Please select an image."
-                        );
-
-                        return;
-                    }
-
-
-                    if (!imageType) {
-
-                        alert(
-                            "Please select an image type."
-                        );
-
-                        return;
-                    }
-
-
-                    const maxSize =
-                        50 * 1024 * 1024;
-
-
-                    if (
-                        file.size >
-                        maxSize
-                    ) {
-
-                        alert(
-                            "File is too large. Maximum allowed size is 50 MB."
-                        );
-
-                        return;
-                    }
-
-
-                    const safeName =
-                        file.name.replace(
-                            /[^a-zA-Z0-9._-]/g,
-                            "_"
-                        );
-
-
-                    const storagePath =
-                        `${patientId}/${Date.now()}_${safeName}`;
-
-
-                    try {
-
-                        console.log(
-                            "Uploading image:",
-                            storagePath
-                        );
-
-
-                        // -------------------------------------
-                        // UPLOAD TO STORAGE
-                        // -------------------------------------
-
-                        const {
-                            error:
-                                uploadError
-                        } =
-                            await db.storage
-                                .from(
-                                    STORAGE_BUCKET
-                                )
-                                .upload(
-                                    storagePath,
-                                    file,
-                                    {
-                                        cacheControl:
-                                            "3600",
-
-                                        upsert:
-                                            false
-                                    }
-                                );
-
-
-                        if (uploadError) {
-
-                            throw new Error(
-                                "Storage upload failed: " +
-                                uploadError.message
-                            );
-                        }
-
-
-                        // -------------------------------------
-                        // GET PUBLIC URL
-                        // -------------------------------------
-
-                        const {
-                            data:
-                                publicData
-                        } =
-                            db.storage
-                                .from(
-                                    STORAGE_BUCKET
-                                )
-                                .getPublicUrl(
-                                    storagePath
-                                );
-
-
-                        const publicUrl =
-                            publicData?.publicUrl ||
-                            null;
-
-
-                        // -------------------------------------
-                        // SAVE DATABASE RECORD
-                        // -------------------------------------
-
-                        const {
-                            error:
-                                recordError
-                        } =
-                            await db
-                                .from(
-                                    "medical_images"
-                                )
-                                .insert({
-
-                                    patient_id:
-                                        patientId,
-
-                                    file_name:
-                                        file.name,
-
-                                    file_path:
-                                        storagePath,
-
-                                    image_type:
-                                        imageType,
-
-                                    public_url:
-                                        publicUrl
-                                });
-
-
-                        if (recordError) {
-
-                            // Remove orphan file
-                            await db.storage
-                                .from(
-                                    STORAGE_BUCKET
-                                )
-                                .remove([
-                                    storagePath
-                                ]);
-
-
-                            throw new Error(
-                                "Database insert failed: " +
-                                recordError.message
-                            );
-                        }
-
-
-                        console.log(
-                            "Image saved successfully."
-                        );
-
-
-                        alert(
-                            "Medical image uploaded successfully!"
-                        );
-
-
-                        imageForm.reset();
-
-
-                        await window.loadMedicalImages();
-
-
-                    } catch (error) {
-
-                        console.error(
-                            "Medical image upload error:",
-                            error
-                        );
-
-
-                        alert(
-                            formatError(
-                                error,
-                                "Could not upload medical image."
-                            )
-                        );
-                    }
-                }
-            );
-
-        } else {
-
-            console.warn(
-                "imageForm not found."
-            );
-        }
-
-
-        // =====================================================
-        // AI RESULTS
-        // =====================================================
-
-        window.loadAIResults =
-            async function loadAIResults() {
-
-                const patientId =
-                    requirePatient();
-
-
-                if (!patientId) {
                     return;
                 }
 
 
-                window.showPage(
-                    "aiResults"
-                );
+                if (
+                    !data ||
+                    data.length === 0
+                ) {
 
+                    imageList.innerHTML = `
+                        <p class="text-muted">
+                            No medical image records found.
+                        </p>
+                    `;
 
-                const resultsList =
-                    document.getElementById(
-                        "resultsList"
-                    );
-
-
-                if (!resultsList) {
                     return;
                 }
 
 
-                setLoading(
-                    "resultsList",
-                    "Loading AI analysis results..."
-                );
+                imageList.innerHTML =
+                    data
+                        .map((image) => {
+
+                            const publicUrl =
+                                image.public_url ||
+                                "";
 
 
-                try {
+                            let preview = "";
 
-                    const {
-                        data,
-                        error
-                    } = await db
-                        .from("ai_results")
-                        .select("*")
-                        .eq(
-                            "patient_id",
-                            patientId
-                        )
-                        .order(
-                            "created_at",
-                            {
-                                ascending: false
+
+                            if (
+                                publicUrl &&
+                                image.image_type !== "MRI"
+                            ) {
+
+                                preview = `
+                                    <div class="mt-3">
+                                        <img
+                                            src="${escapeHtml(publicUrl)}"
+                                            alt="Medical image"
+                                            class="image-preview img-fluid"
+                                        >
+                                    </div>
+                                `;
                             }
-                        );
 
 
-                    if (error) {
+                            return `
+                                <div class="border rounded p-3 mb-3">
 
-                        console.error(
-                            "AI result database error:",
-                            error
-                        );
+                                    <strong>
+                                        ${escapeHtml(
+                                            image.file_name ||
+                                            "Medical Image"
+                                        )}
+                                    </strong>
 
+                                    <br>
 
-                        resultsList.innerHTML = `
-                            <div class="alert alert-danger">
-                                ${escapeHtml(
-                                    formatError(error)
-                                )}
-                            </div>
-                        `;
+                                    <small>
+                                        Type:
+                                        ${escapeHtml(
+                                            image.image_type ||
+                                            "-"
+                                        )}
+                                    </small>
 
-                        return;
-                    }
+                                    ${preview}
 
+                                </div>
+                            `;
 
-                    if (
-                        !data ||
-                        data.length === 0
-                    ) {
-
-                        resultsList.innerHTML = `
-                            <p class="text-muted">
-                                No AI results available.
-                            </p>
-                        `;
-
-                        return;
-                    }
+                        })
+                        .join("");
 
 
-                    resultsList.innerHTML =
-                        data.map(
+            } catch (error) {
+
+                console.error(
+                    "Medical images exception:",
+                    error
+                );
+
+
+                imageList.innerHTML = `
+                    <div class="alert alert-danger">
+                        ${escapeHtml(
+                            formatError(
+                                error,
+                                "Unable to load medical images."
+                            )
+                        )}
+                    </div>
+                `;
+            }
+        };
+
+
+    // =========================================================
+    // LOAD AI RESULTS
+    // =========================================================
+
+    window.loadAIResults =
+        async function loadAIResults() {
+
+            if (!db) {
+
+                console.error(
+                    "Database is not initialized."
+                );
+
+                return;
+            }
+
+
+            const patientId =
+                requirePatient();
+
+
+            if (!patientId) {
+                return;
+            }
+
+
+            window.showPage(
+                "aiResults"
+            );
+
+
+            const resultsList =
+                document.getElementById(
+                    "resultsList"
+                );
+
+
+            if (!resultsList) {
+
+                console.error(
+                    "#resultsList was not found."
+                );
+
+                return;
+            }
+
+
+            setLoading(
+                "resultsList",
+                "Loading AI analysis results..."
+            );
+
+
+            try {
+
+                const {
+                    data,
+                    error
+                } = await db
+                    .from("ai_results")
+                    .select("*")
+                    .eq(
+                        "patient_id",
+                        patientId
+                    )
+                    .order(
+                        "created_at",
+                        {
+                            ascending: false
+                        }
+                    );
+
+
+                if (error) {
+
+                    console.error(
+                        "AI results database error:",
+                        error
+                    );
+
+
+                    resultsList.innerHTML = `
+                        <div class="alert alert-danger">
+                            ${escapeHtml(
+                                formatError(error)
+                            )}
+                        </div>
+                    `;
+
+                    return;
+                }
+
+
+                if (
+                    !data ||
+                    data.length === 0
+                ) {
+
+                    resultsList.innerHTML = `
+                        <p class="text-muted">
+                            No AI results available.
+                        </p>
+                    `;
+
+                    return;
+                }
+
+
+                resultsList.innerHTML =
+                    data
+                        .map(
                             (result) => `
 
                             <div class="border rounded p-3 mb-3">
@@ -1336,58 +751,749 @@
 
                             </div>
                         `
-                        ).join("");
+                        )
+                        .join("");
+
+
+            } catch (error) {
+
+                console.error(
+                    "AI results exception:",
+                    error
+                );
+
+
+                resultsList.innerHTML = `
+                    <div class="alert alert-danger">
+                        ${escapeHtml(
+                            formatError(
+                                error,
+                                "Unable to load AI results."
+                            )
+                        )}
+                    </div>
+                `;
+            }
+        };
+
+
+    // =========================================================
+    // REGISTER PATIENT
+    // =========================================================
+
+    function setupRegistration() {
+
+        const form =
+            document.getElementById(
+                "registerForm"
+            );
+
+
+        if (!form) {
+
+            console.warn(
+                "#registerForm not found."
+            );
+
+            return;
+        }
+
+
+        form.addEventListener(
+            "submit",
+            async function (event) {
+
+                event.preventDefault();
+
+
+                hideError(
+                    "registerError"
+                );
+
+
+                const patientId =
+                    document
+                        .getElementById(
+                            "patientId"
+                        )
+                        ?.value
+                        .trim();
+
+
+                const name =
+                    document
+                        .getElementById(
+                            "name"
+                        )
+                        ?.value
+                        .trim();
+
+
+                const age =
+                    Number(
+                        document
+                            .getElementById(
+                                "age"
+                            )
+                            ?.value
+                    );
+
+
+                const gender =
+                    document
+                        .getElementById(
+                            "gender"
+                        )
+                        ?.value;
+
+
+                const weight =
+                    Number(
+                        document
+                            .getElementById(
+                                "weight"
+                            )
+                            ?.value
+                    );
+
+
+                const height =
+                    Number(
+                        document
+                            .getElementById(
+                                "height"
+                            )
+                            ?.value
+                    );
+
+
+                if (!patientId || !name) {
+
+                    showError(
+                        "registerError",
+                        "Patient ID and name are required."
+                    );
+
+                    return;
+                }
+
+
+                const patientData = {
+                    patient_id: patientId,
+                    name: name,
+                    age: age,
+                    gender: gender,
+                    weight: weight,
+                    height: height
+                };
+
+
+                try {
+
+                    console.log(
+                        "Registering patient:",
+                        patientData
+                    );
+
+
+                    const {
+                        data,
+                        error
+                    } = await db
+                        .from("Patients")
+                        .insert(
+                            patientData
+                        )
+                        .select()
+                        .single();
+
+
+                    if (error) {
+
+                        console.error(
+                            "Patient registration error:",
+                            error
+                        );
+
+
+                        showError(
+                            "registerError",
+                            "Registration failed: " +
+                            formatError(error)
+                        );
+
+                        return;
+                    }
+
+
+                    currentPatient =
+                        data;
+
+
+                    setPatientId(
+                        data.patient_id
+                    );
+
+
+                    form.reset();
+
+
+                    alert(
+                        "Patient registered successfully!"
+                    );
+
+
+                    window.showPage(
+                        "profile"
+                    );
 
 
                 } catch (error) {
 
                     console.error(
-                        "AI results exception:",
+                        "Registration exception:",
                         error
                     );
 
 
-                    resultsList.innerHTML = `
-                        <div class="alert alert-danger">
-                            ${escapeHtml(
-                                formatError(
-                                    error,
-                                    "Unable to load AI results."
-                                )
-                            )}
-                        </div>
-                    `;
+                    showError(
+                        "registerError",
+                        formatError(
+                            error,
+                            "Registration failed."
+                        )
+                    );
                 }
-            };
+            }
+        );
+    }
 
 
-        // =====================================================
-        // LOGOUT
-        // =====================================================
+    // =========================================================
+    // OLD PATIENT LOGIN
+    // =========================================================
 
-        window.logout =
-            function logout() {
+    function setupLogin() {
 
-                clearPatientSession();
+        const form =
+            document.getElementById(
+                "loginForm"
+            );
 
-                window.showPage(
-                    "home"
+
+        if (!form) {
+
+            console.warn(
+                "#loginForm not found."
+            );
+
+            return;
+        }
+
+
+        form.addEventListener(
+            "submit",
+            async function (event) {
+
+                event.preventDefault();
+
+
+                hideError(
+                    "loginError"
                 );
-            };
 
 
-        // =====================================================
+                const patientId =
+                    document
+                        .getElementById(
+                            "loginPatientId"
+                        )
+                        ?.value
+                        .trim();
+
+
+                if (!patientId) {
+
+                    showError(
+                        "loginError",
+                        "Please enter a Patient ID."
+                    );
+
+                    return;
+                }
+
+
+                try {
+
+                    console.log(
+                        "Looking up patient:",
+                        patientId
+                    );
+
+
+                    const {
+                        data,
+                        error
+                    } = await db
+                        .from("Patients")
+                        .select("*")
+                        .eq(
+                            "patient_id",
+                            patientId
+                        )
+                        .maybeSingle();
+
+
+                    if (error) {
+
+                        console.error(
+                            "Login database error:",
+                            error
+                        );
+
+
+                        showError(
+                            "loginError",
+                            "Unable to find patient: " +
+                            formatError(error)
+                        );
+
+                        return;
+                    }
+
+
+                    if (!data) {
+
+                        showError(
+                            "loginError",
+                            "Patient ID not found."
+                        );
+
+                        return;
+                    }
+
+
+                    currentPatient =
+                        data;
+
+
+                    setPatientId(
+                        data.patient_id
+                    );
+
+
+                    form.reset();
+
+
+                    alert(
+                        "Patient record found!"
+                    );
+
+
+                    window.showPage(
+                        "profile"
+                    );
+
+
+                } catch (error) {
+
+                    console.error(
+                        "Login exception:",
+                        error
+                    );
+
+
+                    showError(
+                        "loginError",
+                        formatError(
+                            error,
+                            "Login failed."
+                        )
+                    );
+                }
+            }
+        );
+    }
+
+
+    // =========================================================
+    // MEDICAL IMAGE UPLOAD
+    // =========================================================
+
+    function setupImageUpload(
+        storageBucket
+    ) {
+
+        const form =
+            document.getElementById(
+                "imageForm"
+            );
+
+
+        if (!form) {
+
+            console.warn(
+                "#imageForm not found."
+            );
+
+            return;
+        }
+
+
+        form.addEventListener(
+            "submit",
+            async function (event) {
+
+                event.preventDefault();
+
+
+                const patientId =
+                    requirePatient();
+
+
+                if (!patientId) {
+                    return;
+                }
+
+
+                const fileInput =
+                    document.getElementById(
+                        "medicalFile"
+                    );
+
+
+                const typeInput =
+                    document.getElementById(
+                        "imageType"
+                    );
+
+
+                const file =
+                    fileInput?.files?.[0];
+
+
+                const imageType =
+                    typeInput?.value;
+
+
+                if (!file) {
+
+                    alert(
+                        "Please select an image."
+                    );
+
+                    return;
+                }
+
+
+                if (!imageType) {
+
+                    alert(
+                        "Please select an image type."
+                    );
+
+                    return;
+                }
+
+
+                // 50 MB maximum
+                if (
+                    file.size >
+                    50 * 1024 * 1024
+                ) {
+
+                    alert(
+                        "File is too large. Maximum allowed size is 50 MB."
+                    );
+
+                    return;
+                }
+
+
+                const safeName =
+                    file.name.replace(
+                        /[^a-zA-Z0-9._-]/g,
+                        "_"
+                    );
+
+
+                const storagePath =
+                    `${patientId}/${Date.now()}_${safeName}`;
+
+
+                try {
+
+                    console.log(
+                        "Uploading:",
+                        storagePath
+                    );
+
+
+                    // -----------------------------------------
+                    // STORAGE UPLOAD
+                    // -----------------------------------------
+
+                    const {
+                        error: uploadError
+                    } = await db.storage
+                        .from(storageBucket)
+                        .upload(
+                            storagePath,
+                            file,
+                            {
+                                cacheControl:
+                                    "3600",
+                                upsert:
+                                    false
+                            }
+                        );
+
+
+                    if (uploadError) {
+
+                        throw new Error(
+                            "Storage upload failed: " +
+                            uploadError.message
+                        );
+                    }
+
+
+                    // -----------------------------------------
+                    // PUBLIC URL
+                    // -----------------------------------------
+
+                    const {
+                        data: publicData
+                    } = db.storage
+                        .from(storageBucket)
+                        .getPublicUrl(
+                            storagePath
+                        );
+
+
+                    const publicUrl =
+                        publicData?.publicUrl ||
+                        null;
+
+
+                    // -----------------------------------------
+                    // DATABASE RECORD
+                    // -----------------------------------------
+
+                    const {
+                        error: recordError
+                    } = await db
+                        .from(
+                            "medical_images"
+                        )
+                        .insert({
+
+                            patient_id:
+                                patientId,
+
+                            file_name:
+                                file.name,
+
+                            file_path:
+                                storagePath,
+
+                            image_type:
+                                imageType,
+
+                            public_url:
+                                publicUrl
+                        });
+
+
+                    if (recordError) {
+
+                        // Delete uploaded file
+                        // if database insert fails.
+
+                        await db.storage
+                            .from(
+                                storageBucket
+                            )
+                            .remove([
+                                storagePath
+                            ]);
+
+
+                        throw new Error(
+                            "Database insert failed: " +
+                            recordError.message
+                        );
+                    }
+
+
+                    alert(
+                        "Medical image uploaded successfully!"
+                    );
+
+
+                    form.reset();
+
+
+                    await window.loadMedicalImages();
+
+
+                } catch (error) {
+
+                    console.error(
+                        "Medical image upload error:",
+                        error
+                    );
+
+
+                    alert(
+                        formatError(
+                            error,
+                            "Could not upload medical image."
+                        )
+                    );
+                }
+            }
+        );
+    }
+
+
+    // =========================================================
+    // LOGOUT
+    // =========================================================
+
+    window.logout =
+        function logout() {
+
+            clearPatientSession();
+
+            window.showPage(
+                "home"
+            );
+        };
+
+
+    // =========================================================
+    // APPLICATION INITIALIZATION
+    // =========================================================
+
+    function initialize() {
+
+        console.log(
+            "Initializing AI Knee Analysis System..."
+        );
+
+
+        // -----------------------------------------------------
+        // CONFIGURATION
+        // -----------------------------------------------------
+
+        if (!window.APP_CONFIG) {
+
+            console.error(
+                "APP_CONFIG is missing."
+            );
+
+            alert(
+                "Configuration error: js/config.js was not loaded."
+            );
+
+            return;
+        }
+
+
+        const SUPABASE_URL =
+            window.APP_CONFIG.SUPABASE_URL;
+
+
+        const SUPABASE_PUBLISHABLE_KEY =
+            window.APP_CONFIG.SUPABASE_PUBLISHABLE_KEY;
+
+
+        const STORAGE_BUCKET =
+            window.APP_CONFIG.STORAGE_BUCKET ||
+            DEFAULT_STORAGE_BUCKET;
+
+
+        if (
+            !SUPABASE_URL ||
+            !SUPABASE_PUBLISHABLE_KEY
+        ) {
+
+            console.error(
+                "Supabase configuration is incomplete."
+            );
+
+            alert(
+                "Supabase configuration is incomplete. Check js/config.js."
+            );
+
+            return;
+        }
+
+
+        // -----------------------------------------------------
+        // SUPABASE LIBRARY
+        // -----------------------------------------------------
+
+        if (
+            !window.supabase ||
+            typeof window.supabase.createClient !==
+            "function"
+        ) {
+
+            console.error(
+                "Supabase JavaScript library is missing."
+            );
+
+            alert(
+                "Supabase library was not loaded."
+            );
+
+            return;
+        }
+
+
+        // -----------------------------------------------------
+        // CREATE CLIENT
+        // -----------------------------------------------------
+
+        db =
+            window.supabase.createClient(
+                SUPABASE_URL,
+                SUPABASE_PUBLISHABLE_KEY
+            );
+
+
+        console.log(
+            "Supabase connected."
+        );
+
+
+        // -----------------------------------------------------
+        // SETUP FORMS
+        // -----------------------------------------------------
+
+        setupRegistration();
+
+        setupLogin();
+
+        setupImageUpload(
+            STORAGE_BUCKET
+        );
+
+
+        // -----------------------------------------------------
         // INITIAL PAGE
-        // =====================================================
+        // -----------------------------------------------------
 
         window.showPage(
             "home"
         );
 
 
-        // =====================================================
-        // SAVED PATIENT SESSION
-        // =====================================================
+        // -----------------------------------------------------
+        // SAVED PATIENT
+        // -----------------------------------------------------
 
         const savedPatientId =
             getPatientId();
@@ -1403,8 +1509,28 @@
 
 
         console.log(
-            "Application initialized successfully."
+            "AI Knee Analysis System initialized successfully."
         );
+    }
+
+
+    // =========================================================
+    // START AFTER HTML IS READY
+    // =========================================================
+
+    if (
+        document.readyState ===
+        "loading"
+    ) {
+
+        document.addEventListener(
+            "DOMContentLoaded",
+            initialize
+        );
+
+    } else {
+
+        initialize();
     }
 
 })();
