@@ -470,18 +470,6 @@
     };
 
 
-        tableBody.innerHTML = data.map((implant) => `
-            <tr>
-                <td>${escapeHtml(implant.manufacturer || "-")}</td>
-                <td>${escapeHtml(implant.model || "-")}</td>
-                <td>${escapeHtml(implant.size || "-")}</td>
-                <td>${escapeHtml(implant.femur_ap || "-")}</td>
-                <td>${escapeHtml(implant.femur_ml || "-")}</td>
-                <td>${escapeHtml(implant.tibia_ap || "-")}</td>
-                <td>${escapeHtml(implant.tibia_ml || "-")}</td>
-            </tr>
-        `).join("");
-    };
 
     // ---------------------------------------------------------
     // LOGOUT
