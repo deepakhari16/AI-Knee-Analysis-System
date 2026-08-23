@@ -1,0 +1,125 @@
+body {
+    background: #f4f8fb;
+    font-family: Arial, sans-serif;
+    color: #1f2937;
+}
+
+.navbar-custom {
+    background: #0b5ed7;
+}
+
+.page {
+    display: none;
+    min-height: 90vh;
+}
+
+.active-page {
+    display: block;
+}
+
+.hero {
+    min-height: 90vh;
+    display: flex;
+    align-items: center;
+}
+
+.main-card,
+.form-card,
+.profile-card,
+.action-card {
+    border: none;
+    border-radius: 20px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+}
+
+.option-card {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 18px;
+    padding: 40px 25px;
+    height: 100%;
+    transition: 0.3s;
+}
+
+.option-card:hover,
+.action-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+}
+
+.option-icon {
+    font-size: 50px;
+    color: #0b5ed7;
+}
+
+.form-container {
+    max-width: 700px;
+    margin: 50px auto;
+}
+
+.login-container {
+    max-width: 500px;
+    margin: 70px auto;
+}
+
+.profile-icon {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background: #e7f0ff;
+    color: #0b5ed7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: auto;
+    font-size: 50px;
+}
+
+.info-box {
+    background: #f8fafc;
+    border-radius: 12px;
+    padding: 18px;
+    height: 100%;
+}
+
+.info-title {
+    font-size: 14px;
+    color: #64748b;
+    margin-bottom: 5px;
+}
+
+.info-value {
+    font-size: 17px;
+    font-weight: 600;
+}
+
+.action-card {
+    height: 100%;
+    transition: 0.3s;
+}
+
+.action-icon {
+    font-size: 42px;
+    color: #0b5ed7;
+}
+
+.error-box {
+    display: none;
+}
+
+footer {
+    background: #12344d;
+    color: white;
+}
+
+.image-preview {
+    max-width: 180px;
+    max-height: 140px;
+    object-fit: contain;
+    border-radius: 10px;
+    border: 1px solid #dee2e6;
+}
+
+.loading {
+    opacity: 0.7;
+}

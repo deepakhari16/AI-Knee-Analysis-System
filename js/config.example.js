@@ -1,0 +1,5 @@
+window.APP_CONFIG = {
+    SUPABASE_URL: "https://YOUR_PROJECT.supabase.co",
+    SUPABASE_PUBLISHABLE_KEY: "YOUR_SUPABASE_PUBLISHABLE_KEY",
+    STORAGE_BUCKET: "medical-images"
+};
